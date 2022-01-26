@@ -68,37 +68,42 @@ func (adb *ADB) Init() error {
 }
 
 func (adb *ADB) Close() error {
-	adb.stdin.Close()
-	return adb.cmd.Wait()
-}
+	if adb.cmd == nil {
+		return nil
+	}
 
-// Output runs a command and returns buffers with its output.
-func (adb *ADB) Output(cmd string) (stdout, stderr io.Reader, err error) {
-	_stdout, _stderr := bytes.NewBuffer(nil), bytes.NewBuffer(nil)
-	stdout, stderr = _stdout, _stderr
-	err = adb.Run(cmd, _stdout, _stderr)
-	return
+	adb.stdin.Close()
+	err := adb.cmd.Wait()
+	adb.cmd = nil
+	return err
 }
 
 // Run a command and pipe output to their respective writers.
 func (adb *ADB) Run(cmd string, stdout, stderr io.Writer) error {
-	_, err := fmt.Fprintln(adb.stdin, cmd)
-	if err != nil {
-		return err
-	}
-	if _, err = fmt.Fprintf(adb.stdin, "printf '%%03d' $?; echo -en '%s'\n", delim); err != nil {
-		return err
-	}
-	if _, err = fmt.Fprintf(adb.stdin, "echo -en '%s' >&2\n", delim); err != nil {
-		return err
-	}
+	done := make(chan error, 1)
+	go func() {
+		done <- func() (err error) {
+			if _, err = fmt.Fprintln(adb.stdin, cmd); err != nil {
+				return err
+			}
+			if _, err = fmt.Fprintf(adb.stdin, "printf '%%03d' $?; echo -en '%s'\n", delim); err != nil {
+				return err
+			}
+			if _, err = fmt.Fprintf(adb.stdin, "echo -en '%s' >&2\n", delim); err != nil {
+				return err
+			}
+			return nil
+		}()
+	}()
 
-	done := make(chan error)
 	go func() {
 		done <- func() error {
 			d, err := adb.stdout.Next()
 			if err != nil {
 				return err
+			}
+			if len(d) < 3 {
+				return io.EOF
 			}
 			exit, err := strconv.Atoi(string(d[len(d)-3:]))
 			d = d[:len(d)-3]
@@ -121,7 +126,6 @@ func (adb *ADB) Run(cmd string, stdout, stderr io.Writer) error {
 
 			return exitErr
 		}()
-
 	}()
 
 	go func() {
@@ -139,7 +143,8 @@ func (adb *ADB) Run(cmd string, stdout, stderr io.Writer) error {
 		}()
 	}()
 
-	for i := 0; i < 2; i++ {
+	var err error
+	for i := 0; i < 3; i++ {
 		if e := <-done; e != nil && err == nil {
 			err = e
 		}
