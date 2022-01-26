@@ -37,22 +37,22 @@ icon, _ := png.Decode(...)
 testA := auto.NewSubImgTest("test-chrome-app", icon, 5, image.Rect(50, 800, 750, 1080))
 
 behaviors := auto.NewBehaviors(
-    auto.Behavior{
-        Tests: []auto.Test{
+    auto.NewBehavior(
+        []auto.Test{
             testA,
             auto.NewOrTest(
                 testB,
                 testC,
             ),
         },
-        Run: func(state *auto.State, s *auto.ImageSearch, results []auto.Result) error {
+        func(state *auto.State, s *auto.ImageSearch, results []auto.Result) error {
             fmt.Println("tests evaluated to true")
             state.Stop() // don't test/run anything else this iteration
 
-            r := results[0] // result of testA
+            r := results.Must("test-chrome-app") // result of testA
             client.Tap(r.Min.X, r.Min.Y)
         },
-    },
+    ),
     ...,
 )
 
