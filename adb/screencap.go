@@ -1,10 +1,10 @@
 package adb
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"image"
+	"io"
 )
 
 type PixFmt uint32
@@ -32,26 +32,59 @@ const (
 )
 
 func (adb *ADB) Screencap() (*image.NRGBA, error) {
-	img := bytes.NewBuffer(nil)
-	if err := adb.Run("screencap", img, nil); err != nil {
-		return nil, err
+	r, w := io.Pipe()
+	var gerr error
+	go func() {
+		gerr = adb.Run("screencap", w, nil)
+		w.Close()
+	}()
+	img, err := decodeImageReader(r)
+	if gerr != nil {
+		return nil, gerr
 	}
-	return decodeImage(img.Bytes())
+	return img, err
 }
 
-func decodeImage(input []byte) (*image.NRGBA, error) {
-	_w := binary.LittleEndian.Uint32(input[0+0 : 0+4])
-	_h := binary.LittleEndian.Uint32(input[0+4 : 4+4])
-	_p := binary.LittleEndian.Uint32(input[0+8 : 4+8])
+func decodeImageReader(r io.Reader) (*image.NRGBA, error) {
+	var err error
+	buf := make([]byte, 4)
+	rfull := func() {
+		if err == nil {
+			_, err = io.ReadFull(r, buf)
+		}
+	}
 
+	rfull()
+	_w := binary.LittleEndian.Uint32(buf)
+	rfull()
+	_h := binary.LittleEndian.Uint32(buf)
+	rfull()
+	_p := binary.LittleEndian.Uint32(buf)
 	// unknown byte
-	// _u := binary.LittleEndian.Uint32(input[0+12 : 4+12])
+	rfull()
+
+	if err != nil {
+		return nil, err
+	}
 
 	w, h, p := int(_w), int(_h), PixFmt(_p)
 	switch p {
 	case RGBA_8888:
 		img := image.NewNRGBA(image.Rect(0, 0, w, h))
-		img.Pix = input[16:]
+		o := 0
+		b := make([]byte, 1024)
+		for {
+			n, err := r.Read(b)
+			if n != 0 {
+				copy(img.Pix[o:o+n], b[:n])
+				o += n
+			}
+			if err == io.EOF {
+				break
+			} else if err != nil {
+				return nil, err
+			}
+		}
 		return img, nil
 	}
 
