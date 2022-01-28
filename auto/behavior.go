@@ -36,18 +36,15 @@ func GetOrTest(t Test, search *ImageSearch, results Results, s *Stats) bool {
 	}
 
 	id := twr.ID()
-	start := time.Now()
 	r, ok := results.Get(id)
-	if !ok && t.Test(s, search, results) {
-		s.Add(id, false, time.Since(start))
-		return true
+	if ok {
+		s.Add(id, true, 0)
+		return r.Match
 	}
-
-	s.Add(id, true, 0)
-	if ok && r.Match {
-		return true
-	}
-	return false
+	start := time.Now()
+	res := t.Test(s, search, results)
+	s.Add(id, false, time.Since(start))
+	return res
 }
 
 type Behaviors struct {
