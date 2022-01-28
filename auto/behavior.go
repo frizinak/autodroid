@@ -3,6 +3,7 @@ package auto
 import (
 	"fmt"
 	"image"
+	"time"
 )
 
 type Result struct {
@@ -28,17 +29,21 @@ func (r Results) Must(id ID) Result {
 
 func NewResults() Results { return make(Results) }
 
-func GetOrTest(t Test, search *ImageSearch, results Results) bool {
+func GetOrTest(t Test, search *ImageSearch, results Results, s *Stats) bool {
 	twr, ok := t.(TestWithResult)
 	if !ok {
-		return t.Test(search, results)
+		return t.Test(s, search, results)
 	}
 
 	id := twr.ID()
+	start := time.Now()
 	r, ok := results.Get(id)
-	if !ok && t.Test(search, results) {
+	if !ok && t.Test(s, search, results) {
+		s.Add(id, false, time.Since(start))
 		return true
 	}
+
+	s.Add(id, true, 0)
 	if ok && r.Match {
 		return true
 	}
@@ -48,17 +53,64 @@ func GetOrTest(t Test, search *ImageSearch, results Results) bool {
 type Behaviors struct {
 	list  []Behavior
 	state *State
+	stats *Stats
 }
 
-func NewBehaviors(behaviors ...Behavior) *Behaviors {
-	return &Behaviors{list: behaviors, state: &State{}}
+type Stats struct {
+	list     []ID
+	tests    map[ID]int
+	cached   map[ID]int
+	duration map[ID]time.Duration
 }
+
+func (s *Stats) Add(id ID, cached bool, dur time.Duration) {
+	if s == nil {
+		return
+	}
+	if _, ok := s.tests[id]; !ok {
+		s.list = append(s.list, id)
+		s.tests[id] = 0
+	}
+	m := s.cached
+	if !cached {
+		m = s.tests
+		s.duration[id] += dur
+	}
+	m[id]++
+}
+
+func (s *Stats) Info(id ID) (tests, cached int, duration time.Duration) {
+	if s == nil {
+		return
+	}
+	tests, cached, duration = s.tests[id], s.cached[id], s.duration[id]
+	return
+}
+
+func (s *Stats) List() []ID {
+	return s.list
+}
+
+func NewBehaviors(stats bool, behaviors ...Behavior) *Behaviors {
+	var s *Stats
+	if stats {
+		s = &Stats{
+			make([]ID, 0),
+			make(map[ID]int),
+			make(map[ID]int),
+			make(map[ID]time.Duration),
+		}
+	}
+	return &Behaviors{list: behaviors, state: &State{}, stats: s}
+}
+
+func (b *Behaviors) Stats() *Stats { return b.stats }
 
 func (b *Behaviors) Do(search *ImageSearch) error {
 	results := NewResults()
 	state := b.state
 	var err error
-	b.state, err = state.DoNext(search, results)
+	b.state, err = state.DoNext(b.stats, search, results)
 	if err != nil {
 		return err
 	}
@@ -68,7 +120,10 @@ func (b *Behaviors) Do(search *ImageSearch) error {
 	}
 
 	for _, bh := range b.list {
-		if err := bh.Do(b.state, search, results); err != nil {
+		if err := bh.Do(b.stats, b.state, search, results); err != nil {
+			return err
+		}
+		if err := b.state.DoImmediate(b.stats, search, results); err != nil {
 			return err
 		}
 		if b.state.Stopped() {
@@ -80,7 +135,7 @@ func (b *Behaviors) Do(search *ImageSearch) error {
 }
 
 type Test interface {
-	Test(*ImageSearch, Results) bool
+	Test(*Stats, *ImageSearch, Results) bool
 }
 
 type TestWithResult interface {
@@ -97,7 +152,7 @@ type SubImgTest struct {
 
 func (s SubImgTest) ID() ID { return s.Uniq }
 
-func (s SubImgTest) Test(search *ImageSearch, res Results) bool {
+func (s SubImgTest) Test(stats *Stats, search *ImageSearch, res Results) bool {
 	sr := search.Search(s.Region, s.Img, s.Tolerance)
 	var r Result
 	if len(sr) != 0 {
@@ -119,8 +174,10 @@ type CallbackTest struct {
 	cb   TestCallback
 }
 
-func (c CallbackTest) ID() ID                                   { return c.Uniq }
-func (c CallbackTest) Test(search *ImageSearch, r Results) bool { return c.cb(c, search, r) }
+func (c CallbackTest) ID() ID { return c.Uniq }
+func (c CallbackTest) Test(stats *Stats, search *ImageSearch, r Results) bool {
+	return c.cb(c, search, r)
+}
 
 func NewCallbackTest(id ID, cb TestCallback) CallbackTest {
 	return CallbackTest{Uniq: id, cb: cb}
@@ -134,7 +191,7 @@ type SimpleCallbackTest struct {
 }
 
 func (c SimpleCallbackTest) ID() ID { return c.Uniq }
-func (c SimpleCallbackTest) Test(search *ImageSearch, r Results) bool {
+func (c SimpleCallbackTest) Test(stat *Stats, search *ImageSearch, r Results) bool {
 	res := c.cb(search)
 	r.Set(c, res)
 	return res.Match
@@ -152,9 +209,9 @@ type OrTest struct {
 	TestGroup
 }
 
-func (or OrTest) Test(search *ImageSearch, results Results) bool {
+func (or OrTest) Test(stats *Stats, search *ImageSearch, results Results) bool {
 	for _, t := range or.Tests {
-		if GetOrTest(t, search, results) {
+		if GetOrTest(t, search, results, stats) {
 			return true
 		}
 
@@ -170,8 +227,8 @@ type NotTest struct {
 	T Test
 }
 
-func (not NotTest) Test(search *ImageSearch, results Results) bool {
-	return !not.T.Test(search, results)
+func (not NotTest) Test(stats *Stats, search *ImageSearch, results Results) bool {
+	return !GetOrTest(not.T, search, results, stats)
 }
 
 func NewNotTest(test Test) NotTest {
@@ -182,9 +239,9 @@ type AndTest struct {
 	TestGroup
 }
 
-func (and AndTest) Test(search *ImageSearch, results Results) bool {
+func (and AndTest) Test(stats *Stats, search *ImageSearch, results Results) bool {
 	for _, t := range and.Tests {
-		if !GetOrTest(t, search, results) {
+		if !GetOrTest(t, search, results, stats) {
 			return false
 		}
 	}
@@ -199,8 +256,8 @@ type AlwaysTest struct {
 	T Test
 }
 
-func (a AlwaysTest) Test(search *ImageSearch, results Results) bool {
-	GetOrTest(a.T, search, results)
+func (a AlwaysTest) Test(stats *Stats, search *ImageSearch, results Results) bool {
+	GetOrTest(a.T, search, results, stats)
 	return true
 }
 
@@ -210,53 +267,101 @@ func NewAlwaysTest(test Test) AlwaysTest {
 
 type State struct {
 	stop      bool
-	behaviors []Behavior
+	next      []Behavior
+	immediate []Behavior
 }
 
 func (s *State) Stop()         { s.stop = true }
 func (s *State) Stopped() bool { return s.stop }
-func (s *State) Next(b Behavior) {
-	if s.behaviors == nil {
-		s.behaviors = make([]Behavior, 0, 1)
+
+func (s *State) Immediate(b Behavior) {
+	if s.immediate == nil {
+		s.immediate = make([]Behavior, 0, 1)
 	}
-	s.behaviors = append(s.behaviors, b)
+	s.immediate = append(s.immediate, b)
 }
 
-func (s *State) DoNext(search *ImageSearch, results Results) (*State, error) {
-	if len(s.behaviors) == 0 {
-		return &State{}, nil
+func (s *State) Next(b Behavior) {
+	if s.next == nil {
+		s.next = make([]Behavior, 0, 1)
 	}
+	s.next = append(s.next, b)
+}
 
-	state := &State{}
-	for _, b := range s.behaviors {
-		if err := b.Do(state, search, results); err != nil {
-			return state, err
+func (s *State) DoImmediate(stats *Stats, search *ImageSearch, results Results) error {
+	ns := &State{}
+	immediate := s.immediate
+	s.immediate = s.immediate[:0]
+	for _, b := range immediate {
+		if err := b.Do(stats, ns, search, results); err != nil {
+			return err
 		}
-		if state.Stopped() {
+
+		if err := ns.DoImmediate(stats, search, results); err != nil {
+			return err
+		}
+
+		for _, b := range ns.next {
+			s.Next(b)
+		}
+
+		if ns.Stopped() {
 			break
 		}
 	}
 
-	return state, nil
+	return nil
+}
+
+func (s *State) DoNext(stats *Stats, search *ImageSearch, results Results) (*State, error) {
+	ns := &State{}
+	if len(s.next) == 0 {
+		return ns, nil
+	}
+
+	for _, b := range s.next {
+		if err := b.Do(stats, ns, search, results); err != nil {
+			return ns, err
+		}
+
+		if err := ns.DoImmediate(stats, search, results); err != nil {
+			return ns, err
+		}
+
+		if ns.Stopped() {
+			break
+		}
+	}
+
+	return ns, nil
 }
 
 type Runner func(*State, *ImageSearch, Results) error
 
 type Behavior struct {
 	AndTest
-	Run Runner
+	Run      Runner
+	Fallback Runner
 }
 
-func (b Behavior) Do(state *State, search *ImageSearch, results Results) error {
-	if !b.Test(search, results) {
+func (b Behavior) Do(stats *Stats, state *State, search *ImageSearch, results Results) error {
+	if !b.Test(stats, search, results) {
+		if b.Fallback != nil {
+			return b.Fallback(state, search, results)
+		}
 		return nil
 	}
 	return b.Run(state, search, results)
 }
 
-func NewBehavior(Tests []Test, Run Runner) Behavior {
+func NewBehavior(tests []Test, run Runner) Behavior {
+	return NewBehaviorWithFallback(tests, run, nil)
+}
+
+func NewBehaviorWithFallback(tests []Test, run Runner, fallback Runner) Behavior {
 	return Behavior{
-		AndTest: AndTest{TestGroup{Tests: Tests}},
-		Run:     Run,
+		AndTest:  AndTest{TestGroup{Tests: tests}},
+		Run:      run,
+		Fallback: fallback,
 	}
 }

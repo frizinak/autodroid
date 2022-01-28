@@ -167,7 +167,7 @@ type output struct {
 func newOutput(r io.Reader, max int) *output {
 	s := bufio.NewScanner(r)
 	s.Split(scanDelim)
-	s.Buffer(make([]byte, 0, 4*1024), max)
+	s.Buffer(make([]byte, 0, max), max)
 	return &output{Reader: r, Scanner: s}
 }
 
