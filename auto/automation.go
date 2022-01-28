@@ -157,6 +157,10 @@ func (i *ImageSearch) Bounds() image.Rectangle {
 	return i.b
 }
 
+func (i *ImageSearch) SubImage(r image.Rectangle) *image.NRGBA {
+	return i.c.SubImage(r).(*image.NRGBA)
+}
+
 func (i *ImageSearch) Gray() *image.Gray {
 	if i.g != nil {
 		return i.g
