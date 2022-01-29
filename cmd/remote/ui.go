@@ -122,6 +122,10 @@ func (r *App) onText(w *glfw.Window, char rune) {
 
 func (r *App) onMouseButton(w *glfw.Window, button glfw.MouseButton, action glfw.Action, mod glfw.ModifierKey) {
 	if button != glfw.MouseButton1 {
+		if action == glfw.Press {
+			t := r.TranslateCoords(r.cursorPos)
+			r.log.Println(t)
+		}
 		return
 	}
 	if action == glfw.Press {
