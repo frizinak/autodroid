@@ -45,23 +45,45 @@ func (adb *ADB) Screencap() (*image.NRGBA, error) {
 	return img, err
 }
 
-func decodeImageReader(r io.Reader) (*image.NRGBA, error) {
-	var err error
-	buf := make([]byte, 4)
-	rfull := func() {
-		if err == nil {
-			_, err = io.ReadFull(r, buf)
+func (adb *ADB) ScreencapContinuous(cb func(*image.NRGBA) error) error {
+	var img *image.NRGBA
+	err, reconnect := func() (error, bool) {
+		var err error
+		for {
+			_, err = fmt.Fprintln(adb.stdin, "screencap")
+			if err != nil {
+				return err, true
+			}
+			img, err = decodeImageReader(adb.stdout)
+			if err != nil {
+				return err, true
+			}
+			if err = cb(img); err != nil {
+				return err, false
+			}
 		}
+	}()
+
+	if err != nil && reconnect {
+		_ = adb.Close()
+		_ = adb.Init()
 	}
 
-	rfull()
-	_w := binary.LittleEndian.Uint32(buf)
-	rfull()
-	_h := binary.LittleEndian.Uint32(buf)
-	rfull()
-	_p := binary.LittleEndian.Uint32(buf)
-	// unknown byte
-	rfull()
+	return err
+}
+
+func decodeImageReader(r io.Reader) (*image.NRGBA, error) {
+	var err error
+	buf := make([]byte, 16)
+	_, err = io.ReadFull(r, buf)
+	if err != nil {
+		return nil, err
+	}
+
+	_w := binary.LittleEndian.Uint32(buf[0:4])
+	_h := binary.LittleEndian.Uint32(buf[4:8])
+	_p := binary.LittleEndian.Uint32(buf[8:12])
+	// +unknown byte
 
 	if err != nil {
 		return nil, err
@@ -72,16 +94,13 @@ func decodeImageReader(r io.Reader) (*image.NRGBA, error) {
 	case RGBA_8888:
 		img := image.NewNRGBA(image.Rect(0, 0, w, h))
 		o := 0
-		b := make([]byte, 1024)
 		for {
-			n, err := r.Read(b)
-			if n != 0 {
-				copy(img.Pix[o:o+n], b[:n])
-				o += n
-			}
-			if err == io.EOF {
+			n, err := r.Read(img.Pix[o:])
+			o += n
+			if o == len(img.Pix) {
 				break
-			} else if err != nil {
+			}
+			if err != nil {
 				return nil, err
 			}
 		}
