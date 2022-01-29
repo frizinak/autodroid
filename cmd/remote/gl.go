@@ -33,6 +33,11 @@ func imgTexture(img *image.NRGBA) (uint32, error) {
 	return texture, nil
 }
 
+func releaseTexture(tex uint32) error {
+	gl.DeleteTextures(1, &tex)
+	return nil
+}
+
 func compileShader(source string, shaderType uint32) (uint32, error) {
 	shader := gl.CreateShader(shaderType)
 

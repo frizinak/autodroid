@@ -324,6 +324,13 @@ func (r *App) Run() error {
 			return nil
 		}
 		newEntry(0, img.Bounds())
+
+		if textures[0] != 0 {
+			err = releaseTexture(textures[0] - 1)
+			if err != nil {
+				return err
+			}
+		}
 		stex, err := imgTexture(img)
 
 		tex = stex + 1
