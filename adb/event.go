@@ -10,6 +10,10 @@ func (adb *ADB) Tap(x, y int) error {
 	return adb.Run(fmt.Sprintf("input tap %d %d >/dev/null 2>&1", x, y), nil, nil)
 }
 
+func (adb *ADB) TapQuick(x, y int) error {
+	return adb.Run(fmt.Sprintf("input tap %d %d >/dev/null 2>&1 &", x, y), nil, nil)
+}
+
 func (adb *ADB) Drag(x0, y0, x1, y1 int, dur time.Duration) error {
 	return adb.Run(
 		fmt.Sprintf(
