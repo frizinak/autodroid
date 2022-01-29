@@ -9,6 +9,7 @@ import (
 	"io"
 	"os/exec"
 	"strconv"
+	"strings"
 )
 
 type CmdError struct{ ExitCode int }
@@ -27,6 +28,7 @@ var deliml = len(delimb)
 
 type ADB struct {
 	bin       string
+	dev       string
 	cmd       *exec.Cmd
 	stdin     io.WriteCloser
 	stdout    *output
@@ -35,12 +37,48 @@ type ADB struct {
 	maxBuffer int
 }
 
-func New(executable string, maxBuffer int) *ADB {
-	return &ADB{bin: executable, buf: make([]byte, 1024*4), maxBuffer: maxBuffer}
+func Devices(executable string) ([]string, error) {
+	cmd := exec.Command(executable, "devices")
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	s := bufio.NewScanner(stdout)
+	if err = cmd.Start(); err != nil {
+		return nil, err
+	}
+	list := make([]string, 0)
+
+	s.Scan()
+	for s.Scan() {
+		f := strings.Fields(s.Text())
+		if len(f) == 0 || f[0] == "" {
+			continue
+		}
+		list = append(list, f[0])
+	}
+	if s.Err() != nil {
+		return list, err
+	}
+
+	return list, cmd.Wait()
+}
+
+func New(executable string, device string, maxBuffer int) *ADB {
+	return &ADB{
+		bin:       executable,
+		dev:       device,
+		buf:       make([]byte, 1024*4),
+		maxBuffer: maxBuffer,
+	}
 }
 
 func (adb *ADB) Init() error {
-	cmd := exec.Command(adb.bin, "shell")
+	args := []string{"-s", adb.dev, "shell", "-T"}
+	if adb.dev == "" {
+		args = args[2:]
+	}
+	cmd := exec.Command(adb.bin, args...)
 	cmd.SysProcAttr = parentlessSysProc()
 
 	stdin, err := cmd.StdinPipe()
