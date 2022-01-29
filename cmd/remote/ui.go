@@ -136,8 +136,8 @@ func (r *App) onMouseButton(w *glfw.Window, button glfw.MouseButton, action glfw
 		r.mouseDown = false
 		t := r.TranslateCoords(r.cursorPos)
 		since := time.Since(r.mouseDownTime)
-		if since <= time.Millisecond*50 {
-			if err := r.adb.Tap(t.X, t.Y); err != nil {
+		if since <= time.Millisecond*150 {
+			if err := r.adb.TapQuick(t.X, t.Y); err != nil {
 				r.log.Println(err)
 			}
 		} else {
