@@ -153,7 +153,7 @@ func (r *App) TranslateCoords(i FPoint) image.Point {
 	dims := r.bounds
 	rat := float64(dims.Dx()) / float64(dims.Dy())
 	w, h := r.realWidth, int(float64(r.realWidth)/rat)
-	if float64(r.realHeight)/float64(dims.Dx()) > float64(r.realWidth)/float64(dims.Dy()) {
+	if float64(r.realHeight)/float64(dims.Dy()) < float64(r.realWidth)/float64(dims.Dx()) {
 		w, h = int(float64(r.realHeight)*rat), r.realHeight
 	}
 
