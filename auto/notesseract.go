@@ -7,6 +7,9 @@ import (
 	"image"
 )
 
+func newTess() interface{}                   { return nil }
+func (i *ImageSearch) closeTesseract() error { return nil }
+
 func TextSupported() bool { return false }
 
 func (i *ImageSearch) Text(region image.Rectangle, minConfidence float64) ([]Word, error) {

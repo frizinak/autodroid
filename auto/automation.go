@@ -6,8 +6,6 @@ import (
 	"image/color"
 	"sort"
 	"sync"
-
-	"github.com/otiai10/gosseract/v2"
 )
 
 func ToGray(img *image.NRGBA) *image.Gray {
@@ -133,18 +131,18 @@ type ImageSearch struct {
 	g    *image.Gray
 	b    image.Rectangle
 	pix  map[string]*pixel
-	tess *gosseract.Client
+	tess interface{}
 }
 
 func NewImageSearch() *ImageSearch {
 	return &ImageSearch{
 		pix:  make(map[string]*pixel),
-		tess: gosseract.NewClient(),
+		tess: newTess(),
 	}
 }
 
 func (i *ImageSearch) Close() error {
-	return i.tess.Close()
+	return i.closeTesseract()
 }
 
 func (i *ImageSearch) Set(img *image.NRGBA) {

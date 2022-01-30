@@ -6,8 +6,12 @@ import (
 	"bytes"
 	"image"
 
+	"github.com/otiai10/gosseract/v2"
 	"golang.org/x/image/tiff"
 )
+
+func newTess() interface{}                   { return gosseract.NewClient() }
+func (i *ImageSearch) closeTesseract() error { return i.tess.(*gosseract.Client).Close() }
 
 func TextSupported() bool { return true }
 
@@ -42,10 +46,11 @@ func (i *ImageSearch) Text(region image.Rectangle, minConfidence float64) ([]Wor
 		return nil, err
 	}
 
-	if err := i.tess.SetImageFromBytes(buf.Bytes()); err != nil {
+	tess := i.tess.(*gosseract.Client)
+	if err := tess.SetImageFromBytes(buf.Bytes()); err != nil {
 		return nil, err
 	}
-	bb, err := i.tess.GetBoundingBoxes(3)
+	bb, err := tess.GetBoundingBoxes(3)
 	if err != nil {
 		return nil, err
 	}
